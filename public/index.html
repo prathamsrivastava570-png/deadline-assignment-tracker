@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assignment Deadline Tracker</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 700px; margin: 30px auto; padding: 0 15px; background: #f4f6f8; }
+  h1 { text-align: center; }
+  .card { background: #fff; padding: 16px; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  input, button { padding: 8px; margin: 4px 0; font-size: 14px; }
+  input { width: 100%; box-sizing: border-box; }
+  button { cursor: pointer; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 6px; margin: 8px 0; }
+  .overdue { background: #ffd6d6; }
+  .due-soon { background: #ffe5c2; }
+  .on-track { background: #d9f2d9; }
+  .done { background: #e3e3e3; text-decoration: line-through; }
+  .msg { color: #b00020; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>Assignment Deadline Tracker</h1>
+
+<div id="auth" class="card">
+  <h3>Register / Login</h3>
+  <input id="name" placeholder="Name (only for register)">
+  <input id="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Password">
+  <div class="row">
+    <button onclick="register()">Register</button>
+    <button onclick="login()">Login</button>
+  </div>
+  <p id="authMsg" class="msg"></p>
+</div>
+
+<div id="app" style="display:none">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h3 id="welcome"></h3>
+      <button onclick="logout()">Logout</button>
+    </div>
+    <input id="title" placeholder="Assignment title">
+    <input id="subject" placeholder="Subject">
+    <input id="dueDate" type="date">
+    <button onclick="addAssignment()">Add Assignment</button>
+    <p id="addMsg" class="msg"></p>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button onclick="load('')">All</button>
+      <button onclick="load('overdue')">Overdue</button>
+      <button onclick="load('due-soon')">Due soon</button>
+      <button onclick="load('done')">Done</button>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script>
+let token = localStorage.getItem("token");
+const $ = (id) => document.getElementById(id);
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function api(path, method = "GET", body) {
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (res.status === 401) logout();
+  return { ok: res.ok, data };
+}
+
+function show() {
+  $("auth").style.display = token ? "none" : "block";
+  $("app").style.display = token ? "block" : "none";
+  if (token) {
+    $("welcome").textContent = "Hello, " + (localStorage.getItem("name") || "student");
+    load("");
+  }
+}
+
+async function register() {
+  const res = await fetch("/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: $("name").value, email: $("email").value, password: $("password").value }),
+  });
+  const data = await res.json();
+  $("authMsg").textContent = res.ok ? "Registered! Now click Login." : data.error;
+}
+
+async function login() {
+  const res = await fetch("/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: $("email").value, password: $("password").value }),
+  });
+  const data = await res.json();
+  if (!res.ok) { $("authMsg").textContent = data.error; return; }
+  token = data.token;
+  localStorage.setItem("token", token);
+  localStorage.setItem("name", data.name);
+  show();
+}
+
+function logout() {
+  token = null;
+  localStorage.removeItem("token");
+  show();
+}
+
+async function addAssignment() {
+  const { ok, data } = await api("/assignments", "POST", {
+    title: $("title").value, subject: $("subject").value, dueDate: $("dueDate").value,
+  });
+  $("addMsg").textContent = ok ? "" : data.error;
+  if (ok) { $("title").value = ""; $("subject").value = ""; $("dueDate").value = ""; load(""); }
+}
+
+async function load(filter) {
+  const { data } = await api("/assignments" + (filter ? "?urgency=" + filter : ""));
+  if (!Array.isArray(data)) return;
+  $("list").innerHTML = data.length ? "" : "<p>No assignments here.</p>";
+  data.forEach((a) => {
+    const div = document.createElement("div");
+    div.className = "item " + a.urgency;
+    div.innerHTML =
+      "<div><b>" + esc(a.title) + "</b> (" + esc(a.subject) + ")<br><small>Due " +
+      new Date(a.dueDate).toLocaleDateString() + " · " + a.urgency + "</small></div><div>" +
+      (a.status !== "done" ? '<button onclick="markDone(\'' + a._id + '\')">Done</button> ' : "") +
+      '<button onclick="remove(\'' + a._id + '\')">Delete</button></div>';
+    $("list").appendChild(div);
+  });
+}
+
+async function markDone(id) { await api("/assignments/" + id, "PUT", { status: "done" }); load(""); }
+async function remove(id) { await api("/assignments/" + id, "DELETE"); load(""); }
+
+show();
+</script>
+</body>
+</html>
